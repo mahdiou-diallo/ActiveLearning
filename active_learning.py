@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.metrics import get_scorer
+from scipy.stats import entropy
 
 class ActiveLearner(): # could inherit from some scikit-learn class
 
@@ -17,26 +18,28 @@ class ActiveLearner(): # could inherit from some scikit-learn class
                 `'entropy'` : entropy query, the examples with the highest entropy are chosen
         """
         super().__init__()
-        self.learner = learner
+        self.clf = clf
 
         if strategy == 'least_conf':
-            self.uncertainty_score = self._confidence_score
+            self.uncertainty_scorer = self._confidence_score
         elif strategy == 'margin':
-            self.uncertainty_score = self._margin_score
+            self.uncertainty_scorer = self._margin_score
         elif strategy == 'entropy':
-            self.uncertainty_score = self._entropy_score
+            self.uncertainty_scorer = self._entropy_score
         else:
             raise ValueError(f"Unsupported querying strategy {strategy!r}")
 
     """Querying strategies"""
-    def _confidence_score(self, probas):
-        pass
+    def _confidence_score(self, probas: np.ndarray):
+        return probas.max(axis=1)
 
-    def _margin_score(self, probas):
-        pass
+    def _margin_score(self, probas: np.ndarray):
+        probas_sorted = np.sort(probas, axis=1)
+        margin = probas_sorted[:, -1] - probas_sorted[:, -2]
+        return margin
 
-    def _entropy_score(self, probas):
-        pass
+    def _entropy_score(self, probas: np.ndarray):
+        return -entropy(probas.T)
 
 
     def pick_next_examples(self, X_unlabeled, n):
@@ -50,22 +53,26 @@ class ActiveLearner(): # could inherit from some scikit-learn class
         -------
             the indices of the chosen examples
         """
-        pass
+        probas = self.predict_proba(X_unlabeled)
+        scores = self.uncertainty_scorer(probas)
+        uncertain_idx = np.argsort(-scores)[:n]
+        return uncertain_idx
 
     def fit(self, X, y):
-        pass
+        self.clf.fit(X, y)
+        return self
 
     def predict(self, X):
-        pass
+        return self.clf.predict(X)
     
     def predict_proba(self, X):
-        pass
+        return self.clf.predict_proba(X)
 
 
 class Oracle():
     """class that knows the labels and can tell them to the `ActiveLearner` when requested
     """
-    def __init__(self, learner, metric='f1_macro'):
+    def __init__(self, learner: ActiveLearner, metric: str='f1_macro'):
         """
         Parameters:
         ----------
@@ -90,18 +97,42 @@ class Oracle():
 
         self.batch_size_ = min(y.shape * .01, 20) if batch_size == None else batch_size
 
-        self.bootstrap_idx_ = np.zeros_like(y, dtype=bool)
+        bootstrap_idx_ = np.zeros_like(y, dtype=bool)
         if init_labels_idx == 'random':
             init_size = min(y.shape * .05, 30) if init_size == None else init_size
             init_labels_idx = np.random.choice(y.shape, size=init_size, replace=False)
-        self.bootstrap_idx_[init_labels_idx] = True
-        self.learning_examples_ = self.bootstrap_idx_
+        bootstrap_idx_[init_labels_idx] = True
+        self.learning_examples_ = bootstrap_idx_
 
-        # TODO: learning loop
-        # TODO: create variables and parameters for tracking the classes picked by the learner
-        # TODO: define a stopping criterion. it could be user supplied
+        expls = self.learning_examples_
+        it = 0
+        self.time_chosen_ = np.ones(y.shape, dtype=int) * -1
+        self.performance_score_ = []
+        while(expls.sum() < expls.shape):
+            # training
+            L = X[expls, :]
+            labels = y[expls]
+            self.learner.fit(X=L, y=labels)
+
+            # performance measure
+            predictions = self.learner.predict(X)
+            self.performance_score_.append(self.scorer(y, predictions))
+
+            # new examples selection
+            U = X[~expls, :]
+            new_expls = learner.pick_next_examples(X=U, n=self.batch_size_)
+            self.time_chosen_[new_expls] = it
+            expls[new_expls] = True
+
+            it += 1
+
+        
     
     def predict(self, X):
+        return self.learner.predict(X)
+
+    def get_choice_distribution(self):
         pass
 
-    # TODO: add methods for returning the tracked values
+    def get_error_history(self):
+        pass

@@ -56,7 +56,7 @@ text_clf = Pipeline([
      ('tfidf', TfidfTransformer()),
      ('clf', MultinomialNB()),
 ])
-text_clf.fit(ng5_test.data, ng5_test.target)
+text_clf.fit(ng5_train.data, ng5_train.target)
 
 ## Predict U data
 import numpy as np
@@ -64,8 +64,8 @@ import numpy as np
 n = 100
 
 # predicted classes and corresponding probabilities
-predicted = text_clf.predict(ng5_test.data)
-predicted_proba = text_clf.predict_proba(ng5_test.data)
+predicted = text_clf.predict(classic3)
+predicted_proba = text_clf.predict_proba(classic3)
 #np.mean(predicted == ng5_test.target)
 
 ## Least Confidence (aka. Uncertainty) Strategy

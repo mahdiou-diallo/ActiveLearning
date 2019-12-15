@@ -84,7 +84,7 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
         """
         probas = self.predict_proba(X_unlabeled)
         scores = self.uncertainty_scorer(probas)
-        uncertain_idx = np.argsort(-scores)[:n]
+        uncertain_idx = np.argpartition(scores, n)[:n]
         return uncertain_idx
 
     def fit(self, X, y):

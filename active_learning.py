@@ -73,18 +73,18 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
 
     def pick_next_examples(self, X_unlabeled, n):
         """picks the most uncertain examples based on the query strategy
-        Parameters:
+        Parameters
         ----------
         X_unlabeled : np.ndarray, the unlabeled examples
         n : int, the number of examples to choose
 
-        returns:
+        returns
         -------
         uncertain_idx: np.ndarray, the indices of the `n` chosen examples
         """
         probas = self.predict_proba(X_unlabeled)
         scores = self.uncertainty_scorer(probas)
-        uncertain_idx = np.argsort(-scores)[:n]
+        uncertain_idx = np.argpartition(scores, n)[:n]
         return uncertain_idx
 
     def fit(self, X, y):

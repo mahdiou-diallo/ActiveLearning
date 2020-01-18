@@ -1,6 +1,8 @@
 import numpy as np
-from sklearn.metrics import get_scorer
+import pandas as pd
+from sklearn.metrics import f1_score
 from scipy.stats import entropy
+from types import FunctionType
 
 
 class ActiveLearner(object):  # could inherit from some scikit-learn class
@@ -16,6 +18,7 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
             `'margin'` : margin query, the examples with the lowest difference
                         between most probable and second most probable are chosen
             `'entropy'` : entropy query, the examples with the highest entropy are chosen
+            `'random'` : random examples are chosen
         """
         super().__init__()
         self.clf = clf
@@ -26,6 +29,8 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
             self.uncertainty_scorer = self._margin_score
         elif strategy == 'entropy':
             self.uncertainty_scorer = self._entropy_score
+        elif strategy == 'random':
+            self.uncertainty_scorer = self._random_score
         else:
             raise ValueError(f"Unsupported querying strategy {strategy!r}")
 
@@ -71,6 +76,9 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
         """
         return -entropy(probas.T)
 
+    def _random_score(self, probas: np.ndarray):
+        return -np.random.uniform(size=probas.shape[0])
+
     def pick_next_examples(self, X_unlabeled, n):
         """picks the most uncertain examples based on the query strategy
         Parameters
@@ -82,8 +90,13 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
         -------
         uncertain_idx: np.ndarray, the indices of the `n` chosen examples
         """
+        m = X_unlabeled.shape[0]
+        if m < n:
+            return np.arange(m)
+
         probas = self.predict_proba(X_unlabeled)
         scores = self.uncertainty_scorer(probas)
+
         uncertain_idx = np.argpartition(scores, n)[:n]
         return uncertain_idx
 
@@ -102,18 +115,27 @@ class Oracle(object):
     """class that knows the labels and can provide them to the `ActiveLearner` when requested
     """
 
-    def __init__(self, learner: ActiveLearner, metric: str = 'f1_macro'):
+    def __init__(self, learner: ActiveLearner, metrics=[f1_score]):
         """
         Parameters:
         ----------
         learner : the ActiveLearner to be trained
-        metric : the metric that will be tracked,
-                can be any valid scikit-learn metric 
+        metrics : function or list[function], the metric (or list of metrics) that will be tracked,
+                they can be any valid scikit-learn metrics
         """
         self.learner = learner
-        self.scorer = get_scorer(metric)
 
-    def fit(self, X, y, batch_size=None,
+        if isinstance(metrics, list):
+            self.scorers = metrics
+        elif isinstance(metrics, FunctionType):
+            self.scorers = [metrics]
+        else:
+            raise ValueError(f"Unsupported metric type type {type(metrics)!r}")
+
+        # for s in self.scorers:
+        #     print(type(s))
+
+    def fit(self, X, y, X_test, y_test, batch_size=None,
             init_size=None, init_labels_idx='random'):
         """train the `ActiveLearner` and keep track of the metrics
         Parameters:
@@ -131,45 +153,50 @@ class Oracle(object):
         if init_labels_idx == 'random':
             init_size = 5 if init_size == None else init_size
             init_labels_idx = np.random.choice(
-                y.shape, size=init_size, replace=False)
+                y.shape[0], size=init_size, replace=False)
         bootstrap_idx_[init_labels_idx] = True
-        self.learning_examples_ = bootstrap_idx_
+        learning_examples = bootstrap_idx_
 
-        expls = self.learning_examples_
         it = 0
+        # we put -1 to mark the initial examples
         self.time_chosen_ = np.ones(y.shape, dtype=int) * -1
-        self.performance_score_ = []
-        while(expls.sum() < expls.shape):
+        self.performance_scores_ = []
+        while(learning_examples.sum() < learning_examples.shape[0]):
             # training
-            L = X[expls, :]
-            labels = y[expls]
+            L = X[learning_examples, :]
+            labels = y[learning_examples]
             self.learner.fit(X=L, y=labels)
 
             # performance measure
-            predictions = self.learner.predict(X)
-            self.performance_score_.append(self.scorer(y, predictions))
+            predictions = self.learner.predict(X_test)
+            self.performance_scores_.append(
+                [scorer(y_test, predictions, average='micro') for scorer in self.scorers])
 
             # new examples selection
-            U = X[~expls, :]
-            new_expls = learner.pick_next_examples(X=U, n=self.batch_size_)
-            self.time_chosen_[new_expls] = it
-            expls[new_expls] = True
+            U = X[~learning_examples, :]
+            new_expls = self.learner.pick_next_examples(
+                U, n=self.batch_size_)
+
+            u_idx, = np.where(~learning_examples)
+            chosen_idx = u_idx[new_expls]
+            self.time_chosen_[chosen_idx] = it
+            learning_examples[chosen_idx] = True
 
             it += 1
+
+        columns = [s.__name__ for s in self.scorers]
+        self.performance_scores_ = pd.DataFrame(
+            self.performance_scores_, columns=columns)
 
     def predict(self, X):
         return self.learner.predict(X)
 
-    def get_choice_distribution(self):
-        """Returns at which iteration each example was chosen"""
-        return self.time_chosen_
 
-    def get_error_history(self):
-        """Returns the performance score of the learner at every iteration"""
-        return np.array(self.performance_score_)
-
-
-if __name__ == "__main__":
+def run_doctests():
     import doctest
     learner = ActiveLearner(None)
     doctest.testmod(extraglobs={'learner': learner})
+
+
+if __name__ == "__main__":
+    run_doctests()

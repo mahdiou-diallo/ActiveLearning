@@ -150,7 +150,7 @@ class Oracle(object):
         self.batch_size_ = 1 if batch_size == None else batch_size
 
         bootstrap_idx_ = np.zeros_like(y, dtype=bool)
-        if init_labels_idx == 'random':
+        if isinstance(init_labels_idx, str) and init_labels_idx == 'random':
             init_size = 5 if init_size == None else init_size
             init_labels_idx = np.random.choice(
                 y.shape[0], size=init_size, replace=False)

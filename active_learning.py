@@ -91,12 +91,11 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
         uncertain_idx: np.ndarray, the indices of the `n` chosen examples
         """
         m = X_unlabeled.shape[0]
-        if m < n:
+        if m <= n:
             return np.arange(m)
 
         probas = self.predict_proba(X_unlabeled)
         scores = self.uncertainty_scorer(probas)
-
         uncertain_idx = np.argpartition(scores, n)[:n]
         return uncertain_idx
 

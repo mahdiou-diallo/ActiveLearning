@@ -3,6 +3,7 @@ import pandas as pd
 from sklearn.metrics import f1_score
 from scipy.stats import entropy
 from types import FunctionType
+from sklearn.base import clone
 
 
 class ActiveLearner(object):  # could inherit from some scikit-learn class
@@ -64,7 +65,7 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
         return margin
 
     def _entropy_score(self, probas: np.ndarray):
-        """Return the entropy of the distribution of class probabilities
+        """Return 1 minus the entropy of the distribution of class probabilities
 
         Example
         -------
@@ -72,9 +73,9 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
         ...                    [1., 0., 0.],
         ...                    [.7, .2, .1]])
         >>> np.round(learner._entropy_score(probas), 2)
-        array([-0.69, -0.  , -0.8 ])
+        array([0.31, 1.  , 0.2 ])
         """
-        return -entropy(probas.T)
+        return 1-entropy(probas.T)
 
     def _random_score(self, probas: np.ndarray):
         return -np.random.uniform(size=probas.shape[0])
@@ -160,11 +161,17 @@ class Oracle(object):
         # we put -1 to mark the initial examples
         self.time_chosen_ = np.ones(y.shape, dtype=int) * -1
         self.performance_scores_ = []
+        self.models_ = []
+
         while(learning_examples.sum() < learning_examples.shape[0]):
             # training
             L = X[learning_examples, :]
             labels = y[learning_examples]
+            # pas cool mais ca marche
             self.learner.fit(X=L, y=labels)
+
+            # save model
+            self.models_.append(clone(self.learner, safe=False))
 
             # performance measure
             predictions = self.learner.predict(X_test)

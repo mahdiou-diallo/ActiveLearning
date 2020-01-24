@@ -75,10 +75,12 @@ class ActiveLearner(object):  # could inherit from some scikit-learn class
         >>> np.round(learner._entropy_score(probas), 2)
         array([0.31, 1.  , 0.2 ])
         """
-        return 1-entropy(probas.T)
+        ent = entropy(probas.T)  # calculate entropy
+        ent = ent.max() - ent  # make zero the minimum
+        return ent / ent.max()  # scale it to be in the [0, 1] range
 
     def _random_score(self, probas: np.ndarray):
-        return -np.random.uniform(size=probas.shape[0])
+        return 1-np.random.uniform(size=probas.shape[0])
 
     def pick_next_examples(self, X_unlabeled, n):
         """picks the most uncertain examples based on the query strategy

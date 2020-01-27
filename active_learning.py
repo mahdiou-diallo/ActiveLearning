@@ -117,15 +117,23 @@ class Oracle(object):
     """class that knows the labels and can provide them to the `ActiveLearner` when requested
     """
 
-    def __init__(self, learner: ActiveLearner, metrics=[f1_score]):
+    def __init__(self, learner: ActiveLearner, metrics=[f1_score],
+                 max_iter=None, store_models=False,
+                 random_state=None):
         """
         Parameters:
         ----------
         learner : the ActiveLearner to be trained
         metrics : function or list[function], the metric (or list of metrics) that will be tracked,
                 they can be any valid scikit-learn metrics
+        max_iter: the maximum number of iterations before stopping
+        store_models: option to keep a copy of the ActiveLearner after each iteration
+        random_state: the seed for the random selection of initial examples
         """
         self.learner = learner
+        self.max_iter = max_iter
+        self.store_models = store_models
+        self.random_state = random_state
 
         if isinstance(metrics, list):
             self.scorers = metrics
@@ -137,35 +145,53 @@ class Oracle(object):
         # for s in self.scorers:
         #     print(type(s))
 
-    def fit(self, X, y, X_test, y_test, batch_size=None,
-            init_size=None, init_labels_idx='random'):
+    def fit(self, X, y, X_val=None, y_val=None, batch_size=None,
+            init_size=None, init_labels_idx='random',
+            max_iter=None):
         """train the `ActiveLearner` and keep track of the metrics
         Parameters:
         ----------
         X : np.ndarray, the attributes
         y : np.ndarray, the labels
+        X_val: np.ndarray, the attributes for tracking the metrics
+        y_val: np.ndarray, the labels for tracking the metrics
         batch_size : int, the number of new examples at each iteration
         init_size : int, the number of initial examples the learner can receive
-        init_labels : np.ndarray[int], the indices of the initial examples
+        init_labels_idx : np.ndarray[int], the indices of the initial examples
+        max_iter: the maximum number of training iterations before stopping
         """
+        if X_val is None or y_val is None:
+            X_val = X
+            y_val = y
+
+        if self.random_state is not None:
+            np.random.seed(self.random_state)
+
+        if max_iter is None:
+            max_iter = self.max_iter
 
         self.batch_size_ = 1 if batch_size == None else batch_size
 
         bootstrap_idx_ = np.zeros_like(y, dtype=bool)
+
         if isinstance(init_labels_idx, str) and init_labels_idx == 'random':
             init_size = 5 if init_size == None else init_size
             init_labels_idx = np.random.choice(
                 y.shape[0], size=init_size, replace=False)
+
         bootstrap_idx_[init_labels_idx] = True
         learning_examples = bootstrap_idx_
 
-        it = 0
         # we put -1 to mark the initial examples
-        self.time_chosen_ = np.ones(y.shape, dtype=int) * -1
-        self.performance_scores_ = []
-        self.models_ = []
+        self.time_chosen_ = np.ones(y.shape, dtype=int) * -2
+        self.time_chosen_[learning_examples] = -1
 
-        while(learning_examples.sum() < learning_examples.shape[0]):
+        self.performance_scores_ = []
+        if self.store_models:
+            self.models_ = []
+        it = 0
+        while learning_examples.sum() < learning_examples.shape[0] and \
+                (max_iter is None or it < max_iter):
             # training
             L = X[learning_examples, :]
             labels = y[learning_examples]
@@ -173,12 +199,13 @@ class Oracle(object):
             self.learner.fit(X=L, y=labels)
 
             # save model
-            self.models_.append(clone(self.learner, safe=False))
+            if self.store_models:
+                self.models_.append(clone(self.learner, safe=False))
 
             # performance measure
-            predictions = self.learner.predict(X_test)
+            predictions = self.learner.predict(X_val)
             self.performance_scores_.append(
-                [scorer(y_test, predictions, average='micro') for scorer in self.scorers])
+                [scorer(y_val, predictions, average='macro', zero_division=0) for scorer in self.scorers])
 
             # new examples selection
             U = X[~learning_examples, :]
